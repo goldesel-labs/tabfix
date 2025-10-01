@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Tabfix – Einstellungen</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:24px;max-width:800px}
+    h1{font-size:20px}
+    label{display:block;margin:12px 0 6px}
+    input[type=text],input[type=number]{padding:8px;border:1px solid #ddd;border-radius:8px;width:100%}
+    .row{display:flex;gap:12px;align-items:center}
+    button{padding:10px 12px;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}
+    .muted{color:#666}
+    ul{padding-left:18px}
+    code{background:#f4f4f4;padding:2px 6px;border-radius:4px}
+  </style>
+</head>
+<body>
+  <h1>Tabfix – Einstellungen</h1>
+
+  <label>Inaktivitäts-Autoclose (Minuten, 0 = aus)</label>
+  <input id="autoCloseMinutes" type="number" min="0" step="1" />
+
+  <div class="row">
+    <input id="autoClosePinned" type="checkbox" />
+    <label for="autoClosePinned">Pinned Tabs nie automatisch schließen</label>
+  </div>
+
+  <div class="row">
+    <input id="restoreInNewWindow" type="checkbox" />
+    <label for="restoreInNewWindow">Sessions in neuem Fenster öffnen</label>
+  </div>
+
+  <div class="row">
+    <input id="keepCurrentWindowOnRestore" type="checkbox" />
+    <label for="keepCurrentWindowOnRestore">Aktuelles Fenster behalten</label>
+  </div>
+
+  <h2>Focus-Mode</h2>
+  <div class="row">
+    <input id="focusMode" type="checkbox" />
+    <label for="focusMode">Focus-Mode aktivieren</label>
+  </div>
+
+  <label>Erlaubte Domains im Focus-Mode (kommasepariert, ohne https://, z. B. <code>github.com, notion.so</code>)</label>
+  <input id="focusAllowlist" type="text" />
+
+  <div style="margin-top:16px">
+    <button id="save">Speichern</button>
+    <span id="status" class="muted" style="margin-left:8px"></span>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
