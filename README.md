@@ -1,17 +1,24 @@
-# Tabfix — Digitaler Arbeitsplatz-Manager
+# Tabfix – Digitaler Arbeitsplatz-Manager mit KI-Features  
 
-**Features**
-- Sessions speichern & wiederherstellen (inkl. Pinned & Reihenfolge)
-- Duplikat-Tabs schließen
-- Autoclose inaktive Tabs (konfigurierbar)
-- Focus-Mode (Allowlist-Domains)
-- Kontextmenü: Markierte Auswahl als Notiz pro URL speichern
-- Shortcuts:  
-  - `Ctrl/Cmd+Shift+S` Session schnell speichern  
-  - `Ctrl/Cmd+Shift+R` letzte Session wiederherstellen  
-  - `Ctrl/Cmd+Shift+F` Focus-Mode toggeln
+🚀 **Tabfix** ist ein smarter, KI-gestützter Arbeitsplatz-Manager, der deinen Browser organisiert und dich produktiver macht.  
+Mit Tabfix kannst du deine Tabs, Projekte und Arbeitsumgebungen effizient verwalten – automatisch, intelligent und übersichtlich.  
 
-**Installation (lokal)**
-1. Chrome → `chrome://extensions`
-2. Developer Mode aktivieren (oben rechts)
-3. **Load unpacked** → den Ordner dieses Repos auswählen (lokal gecloned/ZIP entpackt)
+---
+
+## ✨ Features
+
+- **Focus Mode** → schließt automatisch irrelevante Tabs und speichert Kontexte.  
+- **KI-Zusammenfassung** → erstellt eine Übersicht aller offenen Tabs in einem Dashboard.  
+- **Multi-Geräte-Sync** → Chrome, Edge, Safari, Firefox.  
+- **Automatisches Speichern** → Tabs gehen nie mehr verloren.  
+- **One-Click Export** → Exportiere Arbeitsumgebungen oder einzelne Sessions.  
+- **KI-Zusammenfassungen von Inhalten** → z. B. News-Artikel, Dokumente, Webseiten.  
+- **Dark Mode** → moderne UI, sofort verfügbar.  
+
+---
+
+## 📦 Installation (Entwickler-Version)
+
+1. Dieses Repository herunterladen oder klonen:  
+   ```bash
+   git clone https://github.com/goldesel-labs/tabfix.git
