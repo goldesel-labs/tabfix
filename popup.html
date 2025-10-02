@@ -1,52 +1,36 @@
 <!doctype html>
 <html lang="de">
 <head>
-  <meta charset="utf-8">
-  <title>Tabfix</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;margin:12px;min-width:320px}
-    h1{font-size:16px;margin:0 0 8px}
-    .row{display:flex;gap:8px;margin-bottom:8px}
-    input[type=text]{flex:1;padding:8px;border:1px solid #ddd;border-radius:8px}
-    button{padding:8px 10px;border:0;border-radius:8px;cursor:pointer}
-    button.primary{background:#111;color:#fff}
-    .list{max-height:240px;overflow:auto;border:1px solid #eee;border-radius:8px;padding:6px}
-    .item{display:flex;justify-content:space-between;align-items:center;padding:6px;border-bottom:1px solid #f1f1f1}
-    .item:last-child{border-bottom:0}
-    small.muted{color:#666}
-    .pill{background:#f2f2f2;border-radius:999px;padding:2px 8px;font-size:12px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-  </style>
+  <meta charset="utf-8" />
+  <title>Tabfix — Sessions</title>
+  <link rel="stylesheet" href="styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 </head>
-<body>
-  <h1>Tabfix — Sessions</h1>
+<body class="popup">
+  <header><h1>Tabfix — Sessions</h1></header>
 
-  <div class="row">
-    <input id="sessionName" type="text" placeholder="Session-Name (z. B. Kundenprojekt A)">
-    <button id="saveSession" class="primary">Speichern</button>
-  </div>
+  <section class="save">
+    <input id="sessionName" placeholder="Session-Name (z. B. Kundenprojekt)" />
+    <button id="saveBtn">Speichern</button>
+  </section>
 
-  <div class="row">
-    <button id="restoreLast">Letzte Session öffnen</button>
-    <button id="cleanDupes">Duplikate schließen</button>
-  </div>
-
-  <div class="row">
-    <span class="pill"><span id="focusState">Focus aus</span></span>
+  <div class="row" style="gap:8px; flex-wrap:wrap;">
+    <button id="openLast">Letzte Session öffnen</button>
+    <button id="closeDups">Duplikate schließen</button>
     <button id="focusNow">Focus jetzt erzwingen</button>
   </div>
 
-  <h2 style="font-size:14px;margin-top:12px;">Gespeicherte Sessions</h2>
-  <div id="sessions" class="list"></div>
+  <section>
+    <h2>Gespeicherte Sessions</h2>
+    <ul id="sessionList" class="list"></ul>
+  </section>
 
-  <h2 style="font-size:14px;margin-top:12px;">Schnellzugriff</h2>
-  <div class="grid">
-    <button onclick="openOptions()">Einstellungen</button>
-    <button onclick="window.open('https://github.com/goldesel-labs/tabfix','_blank')">Repo</button>
-  </div>
+  <section class="row" style="gap:8px;">
+    <button id="openOptions">Einstellungen</button>
+    <button id="openRepo">Repo</button>
+  </section>
 
-  <p><small class="muted">Shortcuts: Ctrl/Cmd+Shift+S (Speichern), Ctrl/Cmd+Shift+R (Restore), Ctrl/Cmd+Shift+F (Focus)</small></p>
+  <p class="muted">Shortcuts: Ctrl/Cmd+Shift+S (Speichern), Ctrl/Cmd+Shift+R (Restore), Ctrl/Cmd+Shift+K (Focus)</p>
 
   <script src="popup.js"></script>
 </body>
