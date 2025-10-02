@@ -1,73 +1,56 @@
-const $ = sel => document.querySelector(sel);
-
-async function send(type, payload={}) {
-  return new Promise(res => chrome.runtime.sendMessage({ type, ...payload }, res));
+function el(id){ return document.getElementById(id); }
+function liSession(s){
+  const li = document.createElement('li');
+  li.innerHTML = `
+    <div class="row">
+      <div>
+        <strong>${s.name}</strong>
+        <div class="sub">${new Date(s.createdAt).toLocaleString()} • ${s.items.length} Tabs</div>
+      </div>
+      <div class="actions">
+        <button data-act="restore" data-id="${s.id}">Wiederherstellen</button>
+        <button data-act="delete" data-id="${s.id}" class="danger">Löschen</button>
+      </div>
+    </div>`;
+  return li;
 }
-
-function itemRow(name, count, ts) {
-  const div = document.createElement('div');
-  div.className = 'item';
-  const left = document.createElement('div');
-  left.innerHTML = `<strong>${name}</strong><br><small class="muted">${count} Tabs • ${new Date(ts).toLocaleString()}</small>`;
-  const actions = document.createElement('div');
-  const open = document.createElement('button'); open.textContent = 'Öffnen';
-  const del = document.createElement('button'); del.textContent = 'Löschen';
-  actions.append(open, del);
-  div.append(left, actions);
-
-  open.onclick = async () => {
-    const r = await send('RESTORE_SESSION', { name });
-    if (!r.ok) alert('Fehler: ' + r.error);
-  };
-  del.onclick = async () => {
-    if (!confirm(`Session "${name}" löschen?`)) return;
-    const r = await send('DELETE_SESSION', { name });
-    if (r.ok) render(); else alert('Fehler: ' + r.error);
-  };
-  return div;
+async function refresh() {
+  const res = await chrome.runtime.sendMessage({ type: 'GET_SESSIONS' });
+  const list = el('sessionList'); list.innerHTML = '';
+  (res.sessions || []).forEach(s => list.appendChild(liSession(s)));
 }
-
-async function render() {
-  const sessionsDiv = $('#sessions');
-  sessionsDiv.innerHTML = '';
-  const { ok, data } = await send('GET_SESSIONS');
-  if (!ok) return sessionsDiv.textContent = 'Laden fehlgeschlagen.';
-  const names = Object.keys(data).sort((a,b) => (data[b].createdAt||0)-(data[a].createdAt||0));
-  if (!names.length) sessionsDiv.textContent = 'Noch keine Sessions gespeichert.';
-  for (const n of names) {
-    const s = data[n];
-    sessionsDiv.appendChild(itemRow(s.name, s.items.length, s.createdAt));
+el('saveBtn').addEventListener('click', async () => {
+  const name = el('sessionName').value.trim();
+  await chrome.runtime.sendMessage({ type: 'SAVE_SESSION', name: name || undefined });
+  el('sessionName').value = ''; await refresh();
+});
+el('openLast').addEventListener('click', async () => {
+  const res = await chrome.runtime.sendMessage({ type: 'GET_SESSIONS' });
+  if ((res.sessions||[]).length) {
+    await chrome.runtime.sendMessage({ type: 'RESTORE_SESSION', id: res.sessions[0].id });
+    window.close();
   }
-  // Focus-Status
-  const set = await send('GET_SETTINGS');
-  $('#focusState').textContent = set?.data?.focusMode ? 'Focus an' : 'Focus aus';
-}
-
-$('#saveSession').onclick = async () => {
-  const name = $('#sessionName').value.trim() || null;
-  const r = await send('CAPTURE_SESSION', { name });
-  if (!r.ok) return alert('Fehler: ' + r.error);
-  $('#sessionName').value = '';
-  render();
-};
-
-$('#restoreLast').onclick = async () => {
-  const r = await send('RESTORE_SESSION', { name: 'Schnellspeicher' });
-  if (!r.ok) alert('Hinweis: ' + (r.error || 'Schnellspeicher nicht vorhanden.'));
-};
-
-$('#cleanDupes').onclick = async () => {
-  const r = await send('CLOSE_DUPLICATES');
-  if (!r.ok) alert('Fehler: ' + r.error);
-};
-
-$('#focusNow').onclick = async () => {
-  const r = await send('ENFORCE_FOCUS_NOW');
-  if (!r.ok) alert('Fehler: ' + r.error);
-  render();
-};
-
-function openOptions(){ chrome.runtime.openOptionsPage(); }
-window.openOptions = openOptions;
-
-render();
+});
+el('closeDups').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'CLOSE_DUPLICATES' });
+  window.close();
+});
+el('focusNow').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'FOCUS_MODE' });
+  window.close();
+});
+el('openOptions').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
+  window.close();
+});
+el('openRepo').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_REPO' });
+  window.close();
+});
+el('sessionList').addEventListener('click', async (e) => {
+  const t = e.target.closest('button'); if(!t) return;
+  const id = t.dataset.id, act = t.dataset.act;
+  if (act === 'restore') { await chrome.runtime.sendMessage({ type: 'RESTORE_SESSION', id }); window.close(); }
+  if (act === 'delete')  { await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', id }); await refresh(); }
+});
+refresh();
