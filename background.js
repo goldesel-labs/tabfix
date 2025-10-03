@@ -1,196 +1,329 @@
-// ======= Konstanten & Utils =======
-const KEY = {
-  SESSIONS: "tabfix.sessions",          // Array<Session>
-  LAST_ID:  "tabfix.lastSessionId",
-  CFG:      "tabfix.config"             // {autoRestore:boolean, restoreMode:'last'|'favorite'}
+/* Tabfix — Background (MV3)
+   Kernlogik: Sessions, Duplicates, Focus, Export/Import, Auto-Restore
+*/
+
+const STORAGE_KEYS = {
+  SESSIONS: 'tabfix:sessions',       // Array aus Sessions
+  SETTINGS: 'tabfix:settings'        // { autoRestore: bool, keepPinned: bool, focusScope: 'window'|'domain' }
 };
-const REPO_URL = "https://github.com/goldesel-labs/tabfix";
 
-const defaultConfig = { autoRestore: true, restoreMode: "last" };
+// ---------- Helpers ----------
 
-async function getCfg() {
-  const { [KEY.CFG]: cfg } = await chrome.storage.sync.get(KEY.CFG);
-  return { ...defaultConfig, ...(cfg || {}) };
-}
-async function setCfg(cfg) { await chrome.storage.sync.set({ [KEY.CFG]: cfg }); }
-
-async function getSessions() {
-  const { [KEY.SESSIONS]: sessions = [] } = await chrome.storage.local.get(KEY.SESSIONS);
-  return sessions;
-}
-async function saveSessions(s) { await chrome.storage.local.set({ [KEY.SESSIONS]: s }); }
-
-async function setLastId(id) { await chrome.storage.local.set({ [KEY.LAST_ID]: id }); }
-async function getLastId() {
-  const { [KEY.LAST_ID]: id } = await chrome.storage.local.get(KEY.LAST_ID);
-  return id || null;
-}
-const iso = () => new Date().toISOString();
-const byId = (arr, id) => arr.find(x => x.id === id);
-
-// ======= Kernfunktionen =======
-async function snapshotCurrentWindow() {
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  return tabs
-    .filter(t => t.url && !t.url.startsWith("chrome://"))
-    .map(t => ({ url: t.url, pinned: !!t.pinned, title: t.title || "" }));
+async function getAllWindowsAndTabs() {
+  const windows = await chrome.windows.getAll({ populate: true });
+  return windows.map(w => ({
+    id: w.id,
+    focused: w.focused,
+    tabs: (w.tabs || []).map(t => ({
+      id: t.id,
+      url: t.url,
+      title: t.title,
+      pinned: t.pinned,
+      active: t.active
+    }))
+  }));
 }
 
-async function saveCurrentSession(name = "") {
-  const snap = await snapshotCurrentWindow();
-  const sessions = await getSessions();
-  const id = crypto.randomUUID();
-  const entry = { id, name: name || `Session ${sessions.length + 1}`, createdAt: iso(), favorite: false, tabs: snap };
-  sessions.unshift(entry);
-  await saveSessions(sessions);
-  await setLastId(id);
-  setBadge("✓");
-  return entry;
-}
-
-async function openSession(s) {
-  if (!s) throw new Error("Session nicht gefunden");
-  const win = await chrome.windows.create({ url: s.tabs.length ? s.tabs.map(t => t.url) : undefined });
-  const newTabs = await chrome.tabs.query({ windowId: win.id });
-  for (let i = 0; i < Math.min(newTabs.length, s.tabs.length); i++) {
-    if (s.tabs[i].pinned) try { await chrome.tabs.update(newTabs[i].id, { pinned: true }); } catch {}
+function normalizeUrl(u) {
+  try {
+    const url = new URL(u);
+    // gleiche Seite behandeln wir als duplikat, wenn Origin + Pfad gleich sind (Query/Hash ignorieren)
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return u || '';
   }
 }
 
-async function openById(id) {
-  const sessions = await getSessions();
-  const s = byId(sessions, id);
-  await openSession(s);
-  await setLastId(id);
+async function load(key, fallback) {
+  const res = await chrome.storage.local.get(key);
+  return res[key] ?? fallback;
 }
 
-async function openLast() {
-  const id = await getLastId();
-  if (!id) throw new Error("Keine letzte Session gespeichert");
-  await openById(id);
+async function save(key, value) {
+  await chrome.storage.local.set({ [key]: value });
 }
 
-async function openFavorite() {
-  const sessions = await getSessions();
-  const fav = sessions.find(x => x.favorite);
-  if (!fav) throw new Error("Keine Favoriten-Session gesetzt");
-  await openById(fav.id);
+// ---------- Sessions ----------
+
+async function saveSession(name = null) {
+  const snapshot = await getAllWindowsAndTabs();
+  const createdAt = new Date().toISOString();
+
+  const session = {
+    id: crypto.randomUUID(),
+    name: name || `Session ${new Date().toLocaleString()}`,
+    createdAt,
+    windows: snapshot.map(w => ({
+      tabs: w.tabs
+        // nur „echte“ Seiten (ohne chrome:// etc.)
+        .filter(t => /^https?:\/\//.test(t.url))
+        .map(t => ({ url: t.url, pinned: t.pinned }))
+    }))
+  };
+
+  const sessions = await load(STORAGE_KEYS.SESSIONS, []);
+  sessions.unshift(session);                  // neueste nach oben
+  // optional: nur die letzten 30 behalten
+  if (sessions.length > 30) sessions.length = 30;
+  await save(STORAGE_KEYS.SESSIONS, sessions);
+
+  return session;
 }
 
-async function closeDuplicates() {
-  const tabs = await chrome.tabs.query({ currentWindow: true });
+async function listSessions() {
+  return load(STORAGE_KEYS.SESSIONS, []);
+}
+
+async function deleteSession(id) {
+  const sessions = await load(STORAGE_KEYS.SESSIONS, []);
+  const next = sessions.filter(s => s.id !== id);
+  await save(STORAGE_KEYS.SESSIONS, next);
+  return next;
+}
+
+async function openLastSession(inNewWindows = true) {
+  const sessions = await load(STORAGE_KEYS.SESSIONS, []);
+  if (!sessions.length) throw new Error('Keine gespeicherten Sessions gefunden.');
+  return restoreSession(sessions[0], inNewWindows);
+}
+
+async function restoreSession(session, inNewWindows = true) {
+  if (!session || !session.windows?.length) return;
+
+  if (inNewWindows) {
+    // Pro gespeichertes Fenster ein neues Browserfenster öffnen
+    for (let i = 0; i < session.windows.length; i++) {
+      const w = session.windows[i];
+      const urls = w.tabs.map(t => t.url);
+      if (!urls.length) continue;
+
+      // Erstes Fenster mit „focused“, weitere ohne Zwang
+      await chrome.windows.create({
+        url: urls,
+        focused: i === 0
+      });
+
+      // Pinned-Status nachträglich setzen
+      // (MV3: Tabs nach create abfragen und nach Index pinnen)
+      const current = await chrome.windows.getCurrent({ populate: true });
+      const createdTabs = (current.tabs || []).slice(0, w.tabs.length);
+      await Promise.all(
+        createdTabs.map((tab, idx) => chrome.tabs.update(tab.id, { pinned: !!w.tabs[idx].pinned }).catch(() => {}))
+      );
+    }
+  } else {
+    // In aktuelles Fenster alle Tabs hinten anhängen
+    const w = await chrome.windows.getCurrent();
+    for (const win of session.windows) {
+      for (const t of win.tabs) {
+        try {
+          const tab = await chrome.tabs.create({ windowId: w.id, url: t.url });
+          if (t.pinned) await chrome.tabs.update(tab.id, { pinned: true });
+        } catch {}
+      }
+    }
+  }
+}
+
+// ---------- Duplicate Handling ----------
+
+async function closeDuplicates({ keepPinned = true } = {}) {
+  const windows = await getAllWindowsAndTabs();
   const seen = new Set();
-  const toClose = [];
-  for (const t of tabs) {
-    const url = (t.url || "").replace(/#.*$/, "");
-    if (!url || url.startsWith("chrome://")) continue;
-    if (seen.has(url)) toClose.push(t.id);
-    else seen.add(url);
+  let closed = 0;
+
+  for (const w of windows) {
+    for (const t of w.tabs) {
+      if (!/^https?:\/\//.test(t.url)) continue;
+      if (keepPinned && t.pinned) continue;
+      const key = normalizeUrl(t.url);
+      if (seen.has(key)) {
+        try {
+          await chrome.tabs.remove(t.id);
+          closed++;
+        } catch {}
+      } else {
+        seen.add(key);
+      }
+    }
   }
-  if (toClose.length) await chrome.tabs.remove(toClose);
-  setBadge(toClose.length ? String(toClose.length) : "");
-  return toClose.length;
+  return closed;
 }
 
-async function focusNow() {
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  const others = tabs.filter(t => !t.active).map(t => t.id);
-  if (others.length) {
-    const gid = await chrome.tabs.group({ tabIds: others });
-    await chrome.tabGroups.update(gid, { collapsed: true, title: "Tabfix – Focus" });
+// ---------- Focus Mode ----------
+
+/*
+  Varianten:
+  - focusScope: 'window'  => nur aktives Fenster behalten, andere Fenster schließen
+  - focusScope: 'domain'  => in aktivem Fenster nur Tabs der aktiven Domain behalten
+*/
+async function focusNow(scope = 'window') {
+  const current = await chrome.windows.getCurrent({ populate: true });
+  const all = await chrome.windows.getAll({ populate: true });
+
+  if (scope === 'window') {
+    // alle anderen Fenster schließen
+    for (const w of all) {
+      if (w.id !== current.id) {
+        try { await chrome.windows.remove(w.id); } catch {}
+      }
+    }
+    return { closedWindows: all.filter(w => w.id !== current.id).length };
   }
+
+  if (scope === 'domain') {
+    const activeTab = (current.tabs || []).find(t => t.active);
+    if (!activeTab || !/^https?:\/\//.test(activeTab.url)) return { closedTabs: 0 };
+
+    const activeDomain = new URL(activeTab.url).hostname;
+    let closedTabs = 0;
+
+    for (const t of (current.tabs || [])) {
+      try {
+        if (!t.active && /^https?:\/\//.test(t.url)) {
+          const host = new URL(t.url).hostname;
+          if (host !== activeDomain) {
+            await chrome.tabs.remove(t.id);
+            closedTabs++;
+          }
+        }
+      } catch {}
+    }
+    return { closedTabs };
+  }
+
+  return {};
 }
 
-function setBadge(text = "") {
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color: "#111" });
-}
-
-function openRepo() { chrome.tabs.create({ url: REPO_URL }); }
+// ---------- Export / Import ----------
 
 async function exportSessions() {
-  const sessions = await getSessions();
-  const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
+  const sessions = await load(STORAGE_KEYS.SESSIONS, []);
+  const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  await chrome.downloads.download({ url, filename: "tabfix-sessions.json", saveAs: true });
-  URL.revokeObjectURL(url);
+  return url; // Popup lädt die URL und triggert Download
 }
 
-async function importSessionsFromText(text) {
-  const parsed = JSON.parse(text);
-  if (!Array.isArray(parsed)) throw new Error("Ungültiges JSON");
-  await saveSessions(parsed);
+async function importSessions(jsonString) {
+  try {
+    const incoming = JSON.parse(jsonString);
+    if (!Array.isArray(incoming)) throw new Error('Ungültiges Format');
+
+    const current = await load(STORAGE_KEYS.SESSIONS, []);
+    // neue oben einfügen, IDs sicherstellen
+    const withIds = incoming.map(s => ({ ...s, id: s.id || crypto.randomUUID() }));
+    const merged = [...withIds, ...current];
+    await save(STORAGE_KEYS.SESSIONS, merged);
+    return merged.length;
+  } catch (e) {
+    throw new Error('Import fehlgeschlagen: ' + e.message);
+  }
 }
 
-// ======= Kontextmenü & Shortcuts =======
-chrome.runtime.onInstalled.addListener(async () => {
-  // Kontextmenü
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "tabfix.save",    title: "Tabfix: Aktuelle Session speichern", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "tabfix.openlast",title: "Tabfix: Letzte Session öffnen",     contexts: ["action"] });
-    chrome.contextMenus.create({ id: "tabfix.focus",   title: "Tabfix: Focus jetzt erzwingen",     contexts: ["action"] });
-    chrome.contextMenus.create({ id: "tabfix.dupes",   title: "Tabfix: Duplikate schließen",       contexts: ["action"] });
+// ---------- Settings / Auto-Restore ----------
+
+async function getSettings() {
+  return load(STORAGE_KEYS.SETTINGS, {
+    autoRestore: false,
+    keepPinned: true,
+    focusScope: 'window'
   });
+}
+
+async function updateSettings(patch) {
+  const cur = await getSettings();
+  const next = { ...cur, ...patch };
+  await save(STORAGE_KEYS.SETTINGS, next);
+  return next;
+}
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await getSettings(); // Defaults sicher schreiben
 });
 
-chrome.contextMenus.onClicked.addListener(async (info) => {
-  try {
-    if (info.menuItemId === "tabfix.save") await saveCurrentSession();
-    if (info.menuItemId === "tabfix.openlast") await openLast();
-    if (info.menuItemId === "tabfix.focus") await focusNow();
-    if (info.menuItemId === "tabfix.dupes") await closeDuplicates();
-  } catch (e) { notify(String(e?.message || e)); }
-});
-
-chrome.commands.onCommand.addListener(async (cmd) => {
-  try {
-    if (cmd === "save_session")    await saveCurrentSession();
-    if (cmd === "open_last")       await openLast();
-    if (cmd === "focus_now")       await focusNow();
-    if (cmd === "close_dupes")     await closeDuplicates();
-  } catch (e) { notify(String(e?.message || e)); }
-});
-
-// ======= Auto-Restore =======
 chrome.runtime.onStartup.addListener(async () => {
-  try {
-    const cfg = await getCfg();
-    if (!cfg.autoRestore) return;
-    if (cfg.restoreMode === "favorite") await openFavorite();
-    else await openLast();
-  } catch { /* still silent */ }
+  const settings = await getSettings();
+  if (settings.autoRestore) {
+    try {
+      await openLastSession(true);
+    } catch (e) {
+      console.warn('Auto-Restore fehlgeschlagen:', e);
+    }
+  }
 });
 
-// ======= Messaging (Popup/Options) =======
-chrome.runtime.onMessage.addListener((msg, _sender, send) => {
+// ---------- Message API (vom Popup/Options aufgerufen) ----------
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     try {
       switch (msg.type) {
-        case "SAVE_SESSION":      return send({ ok: true, entry: await saveCurrentSession(msg.name) });
-        case "OPEN_LAST":         await openLast(); return send({ ok: true });
-        case "OPEN_BY_ID":        await openById(msg.id); return send({ ok: true });
-        case "CLOSE_DUPES":       return send({ ok: true, closed: await closeDuplicates() });
-        case "FOCUS_NOW":         await focusNow(); return send({ ok: true });
-        case "OPEN_REPO":         openRepo(); return send({ ok: true });
-        case "GET_SESSIONS":      return send({ ok: true, sessions: await getSessions() });
-        case "SET_SESSIONS":      await saveSessions(msg.sessions || []); return send({ ok: true });
-        case "SET_LAST":          await setLastId(msg.id); return send({ ok: true });
-        case "GET_CFG":           return send({ ok: true, cfg: await getCfg() });
-        case "SET_CFG":           await setCfg(msg.cfg || defaultConfig); return send({ ok: true });
-        case "EXPORT":            await exportSessions(); return send({ ok: true });
-        case "IMPORT_TEXT":       await importSessionsFromText(msg.text || ""); return send({ ok: true });
-        default:                  return send({ ok: false, error: "Unknown message" });
+        case 'SAVE_SESSION': {
+          const session = await saveSession(msg.payload?.name);
+          sendResponse({ ok: true, session });
+          break;
+        }
+        case 'LIST_SESSIONS': {
+          const sessions = await listSessions();
+          sendResponse({ ok: true, sessions });
+          break;
+        }
+        case 'DELETE_SESSION': {
+          const sessions = await deleteSession(msg.payload?.id);
+          sendResponse({ ok: true, sessions });
+          break;
+        }
+        case 'OPEN_LAST_SESSION': {
+          await openLastSession(true);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'RESTORE_SESSION': {
+          await restoreSession(msg.payload?.session, true);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'CLOSE_DUPLICATES': {
+          const settings = await getSettings();
+          const closed = await closeDuplicates({ keepPinned: settings.keepPinned });
+          sendResponse({ ok: true, closed });
+          break;
+        }
+        case 'FOCUS_NOW': {
+          const settings = await getSettings();
+          const result = await focusNow(settings.focusScope || 'window');
+          sendResponse({ ok: true, result });
+          break;
+        }
+        case 'EXPORT_SESSIONS': {
+          const url = await exportSessions();
+          sendResponse({ ok: true, url });
+          break;
+        }
+        case 'IMPORT_SESSIONS': {
+          const count = await importSessions(msg.payload?.json || '[]');
+          sendResponse({ ok: true, count });
+          break;
+        }
+        case 'GET_SETTINGS': {
+          const s = await getSettings();
+          sendResponse({ ok: true, settings: s });
+          break;
+        }
+        case 'UPDATE_SETTINGS': {
+          const s = await updateSettings(msg.payload || {});
+          sendResponse({ ok: true, settings: s });
+          break;
+        }
+        default:
+          sendResponse({ ok: false, error: 'Unknown message type' });
       }
-    } catch (e) { return send({ ok: false, error: String(e?.message || e) }); }
+    } catch (e) {
+      console.error('BG error:', e);
+      sendResponse({ ok: false, error: e.message });
+    }
   })();
+
+  // wichtig für async sendResponse in MV3:
   return true;
 });
-
-function notify(message) {
-  chrome.notifications.create({
-    type: "basic",
-    iconUrl: "assets/icon-128.png",
-    title: "Tabfix",
-    message
-  }, () => {});
-}
