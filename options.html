@@ -1,43 +1,45 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8"/>
-  <title>Tabfix – Einstellungen</title>
+  <meta charset="utf-8" />
+  <title>Tabfix Einstellungen</title>
   <style>
-    body { font: 14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:20px; max-width:900px; }
-    h1 { margin:0 0 12px; }
-    .cfg { margin: 16px 0; padding: 12px; border:1px solid #eee; border-radius:10px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; }
-    button { padding:6px 10px; border:1px solid #ddd; border-radius:8px; cursor:pointer; }
-    input[type=text] { padding:6px 8px; border:1px solid #ddd; border-radius:8px; width: 100%; }
-    .row { display:flex; gap:8px; flex-wrap: wrap; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; max-width: 720px; }
+    .row { margin: 14px 0; }
+    label { display: block; margin: 6px 0; }
+    select, input[type="checkbox"] { margin-right: 6px; }
+    .muted { color: #666; }
+    code { background: #f5f5f5; padding: 2px 6px; border-radius: 6px; }
   </style>
 </head>
 <body>
-  <h1>Tabfix – Einstellungen & Sessions</h1>
+  <h1>Tabfix — Einstellungen</h1>
 
-  <div class="cfg">
-    <label><input type="checkbox" id="autoRestore"> Auto-Restore beim Browserstart</label>
-    <div class="row" style="margin-top:8px">
-      <label><input type="radio" name="restoreMode" value="last"> Letzte Session</label>
-      <label><input type="radio" name="restoreMode" value="favorite"> Favorit</label>
-      <button id="saveCfg">Einstellungen speichern</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button id="export">Export (JSON)</button>
-      <input type="file" id="importFile" accept="application/json">
-      <button id="importBtn">Import</button>
-    </div>
+  <div class="row">
+    <label>
+      <input id="autoRestore" type="checkbox" />
+      Letzte Session beim Browserstart automatisch öffnen
+    </label>
+    <label>
+      <input id="keepPinned" type="checkbox" />
+      Pinned Tabs beim Duplikate-Schließen behalten
+    </label>
+    <label>
+      Focus-Modus:
+      <select id="focusScope">
+        <option value="window">Nur aktives Fenster behalten</option>
+        <option value="domain">Nur aktive Domain behalten (im aktuellen Fenster)</option>
+      </select>
+    </label>
+    <button id="save">Speichern</button>
   </div>
 
-  <h2>Gespeicherte Sessions</h2>
-  <table>
-    <thead>
-      <tr><th>Favorit</th><th>Name</th><th>Erstellt</th><th>Tabs</th><th>Aktion</th></tr>
-    </thead>
-    <tbody id="list"></tbody>
-  </table>
+  <h2>Shortcuts</h2>
+  <div class="row muted">
+    Du kannst Tastenkombinationen hier ändern: <code>chrome://extensions/shortcuts</code><br />
+    Voreinstellungen: Speichern <code>⌘/Ctrl+Shift+S</code>, Wiederherstellen <code>⌘/Ctrl+Shift+R</code>,<br/>
+    Duplikate <code>⌘/Ctrl+Shift+D</code>, Focus <code>⌘/Ctrl+Shift+F</code>
+  </div>
 
   <script src="options.js"></script>
 </body>
