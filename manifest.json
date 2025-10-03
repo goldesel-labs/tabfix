@@ -2,28 +2,54 @@
   "manifest_version": 3,
   "name": "Tabfix — Sessions & Focus",
   "version": "1.0.0",
-  "description": "Sessions speichern/öffnen, Duplikate schließen, Focus-Modus, Auto-Restore, Export/Import, Shortcuts & Kontextmenü.",
+  "description": "Sessions speichern/öffnen, Duplikate schließen, Focus-Modus, Export/Import, Shortcuts & Kontextmenü.",
+  "action": {
+    "default_title": "Tabfix",
+    "default_popup": "popup.html"
+  },
   "icons": {
     "16": "assets/icon-16.png",
     "48": "assets/icon-48.png",
     "128": "assets/icon-128.png"
   },
+  "permissions": [
+    "tabs",
+    "storage",
+    "contextMenus"
+  ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },
-  "action": {
-    "default_popup": "popup.html",
-    "default_icon": {
-      "16": "assets/icon-16.png",
-      "48": "assets/icon-48.png",
-      "128": "assets/icon-128.png"
+  "options_page": "options.html",
+  "commands": {
+    "save_session": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Aktuelle Session speichern"
+    },
+    "open_last_session": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+R",
+        "mac": "Command+Shift+R"
+      },
+      "description": "Letzte Session öffnen"
+    },
+    "close_duplicates": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+D",
+        "mac": "Command+Shift+D"
+      },
+      "description": "Duplikate schließen"
+    },
+    "focus_now": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+F",
+        "mac": "Command+Shift+F"
+      },
+      "description": "Focus jetzt erzwingen"
     }
-  },
-  "permissions": [
-    "tabs",
-    "storage"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ]
+  }
 }
