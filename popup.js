@@ -1,56 +1,33 @@
-function el(id){ return document.getElementById(id); }
-function liSession(s){
-  const li = document.createElement('li');
-  li.innerHTML = `
-    <div class="row">
-      <div>
-        <strong>${s.name}</strong>
-        <div class="sub">${new Date(s.createdAt).toLocaleString()} • ${s.items.length} Tabs</div>
-      </div>
-      <div class="actions">
-        <button data-act="restore" data-id="${s.id}">Wiederherstellen</button>
-        <button data-act="delete" data-id="${s.id}" class="danger">Löschen</button>
-      </div>
-    </div>`;
-  return li;
-}
-async function refresh() {
-  const res = await chrome.runtime.sendMessage({ type: 'GET_SESSIONS' });
-  const list = el('sessionList'); list.innerHTML = '';
-  (res.sessions || []).forEach(s => list.appendChild(liSession(s)));
-}
-el('saveBtn').addEventListener('click', async () => {
-  const name = el('sessionName').value.trim();
-  await chrome.runtime.sendMessage({ type: 'SAVE_SESSION', name: name || undefined });
-  el('sessionName').value = ''; await refresh();
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const ok = (t) => { statusEl.textContent = t; statusEl.style.color = "#1a7f37"; };
+const err = (t) => { statusEl.textContent = t; statusEl.style.color = "#b3261e"; };
+
+const send = (type, payload={}) => chrome.runtime.sendMessage({ type, ...payload });
+
+$("save").addEventListener("click", async () => {
+  const name = $("sessionName").value.trim();
+  const res = await send("SAVE_SESSION", { name });
+  res.ok ? ok(`Gespeichert (${res.entry.tabs.length} Tabs)`) : err(res.error || "Fehler");
 });
-el('openLast').addEventListener('click', async () => {
-  const res = await chrome.runtime.sendMessage({ type: 'GET_SESSIONS' });
-  if ((res.sessions||[]).length) {
-    await chrome.runtime.sendMessage({ type: 'RESTORE_SESSION', id: res.sessions[0].id });
-    window.close();
-  }
+
+$("openLast").addEventListener("click", async () => {
+  const res = await send("OPEN_LAST");
+  res.ok ? ok("Letzte Session geöffnet") : err(res.error || "Keine letzte Session");
 });
-el('closeDups').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'CLOSE_DUPLICATES' });
-  window.close();
+
+$("closeDupes").addEventListener("click", async () => {
+  const res = await send("CLOSE_DUPES");
+  res.ok ? ok(`${res.closed} Duplikat(e) geschlossen`) : err(res.error || "Fehler");
 });
-el('focusNow').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'FOCUS_MODE' });
-  window.close();
+
+$("focus").addEventListener("click", async () => {
+  const res = await send("FOCUS_NOW");
+  res.ok ? ok("Focus aktiviert") : err(res.error || "Fehler");
 });
-el('openOptions').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
-  window.close();
+
+$("options").addEventListener("click", () => chrome.runtime.openOptionsPage());
+$("repo").addEventListener("click", async () => {
+  const res = await send("OPEN_REPO");
+  if (!res.ok) err(res.error || "Fehler");
 });
-el('openRepo').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'OPEN_REPO' });
-  window.close();
-});
-el('sessionList').addEventListener('click', async (e) => {
-  const t = e.target.closest('button'); if(!t) return;
-  const id = t.dataset.id, act = t.dataset.act;
-  if (act === 'restore') { await chrome.runtime.sendMessage({ type: 'RESTORE_SESSION', id }); window.close(); }
-  if (act === 'delete')  { await chrome.runtime.sendMessage({ type: 'DELETE_SESSION', id }); await refresh(); }
-});
-refresh();
