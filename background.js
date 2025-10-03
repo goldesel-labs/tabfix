@@ -1,120 +1,196 @@
-/* Tabfix Background – Kernlogik: Sessions speichern/wiederherstellen, Fokus-Modus, Duplicates schließen */
+// ======= Konstanten & Utils =======
+const KEY = {
+  SESSIONS: "tabfix.sessions",          // Array<Session>
+  LAST_ID:  "tabfix.lastSessionId",
+  CFG:      "tabfix.config"             // {autoRestore:boolean, restoreMode:'last'|'favorite'}
+};
+const REPO_URL = "https://github.com/goldesel-labs/tabfix";
 
-const STORAGE_KEY = 'tabfix:sessions';
-const SETTINGS_KEY = 'tabfix:settings';
+const defaultConfig = { autoRestore: true, restoreMode: "last" };
 
-/** Hilfen **/
-async function getAllTabsInCurrentWindow() {
-  const win = await chrome.windows.getCurrent({ populate: true });
-  return (win.tabs || []).filter(t => !t.discarded);
+async function getCfg() {
+  const { [KEY.CFG]: cfg } = await chrome.storage.sync.get(KEY.CFG);
+  return { ...defaultConfig, ...(cfg || {}) };
 }
-async function getSettings() {
-  const { [SETTINGS_KEY]: s } = await chrome.storage.sync.get(SETTINGS_KEY);
-  return s || { focusKeepPinned: true, focusKeepSameDomain: true, focusCloseAudible: false, sessionsLimit: 20 };
+async function setCfg(cfg) { await chrome.storage.sync.set({ [KEY.CFG]: cfg }); }
+
+async function getSessions() {
+  const { [KEY.SESSIONS]: sessions = [] } = await chrome.storage.local.get(KEY.SESSIONS);
+  return sessions;
 }
-async function saveSettings(s) { await chrome.storage.sync.set({ [SETTINGS_KEY]: s }); }
-async function loadSessions() {
-  const { [STORAGE_KEY]: raw } = await chrome.storage.local.get(STORAGE_KEY);
-  return Array.isArray(raw) ? raw : [];
+async function saveSessions(s) { await chrome.storage.local.set({ [KEY.SESSIONS]: s }); }
+
+async function setLastId(id) { await chrome.storage.local.set({ [KEY.LAST_ID]: id }); }
+async function getLastId() {
+  const { [KEY.LAST_ID]: id } = await chrome.storage.local.get(KEY.LAST_ID);
+  return id || null;
 }
-async function persistSessions(list) { await chrome.storage.local.set({ [STORAGE_KEY]: list.slice(0, 50) }); }
-function sameDomain(u1, u2) {
-  try {
-    const a = new URL(u1), b = new URL(u2);
-    return a.hostname.replace(/^www\./,'') === b.hostname.replace(/^www\./,'');
-  } catch { return false; }
+const iso = () => new Date().toISOString();
+const byId = (arr, id) => arr.find(x => x.id === id);
+
+// ======= Kernfunktionen =======
+async function snapshotCurrentWindow() {
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  return tabs
+    .filter(t => t.url && !t.url.startsWith("chrome://"))
+    .map(t => ({ url: t.url, pinned: !!t.pinned, title: t.title || "" }));
 }
 
-async function saveCurrentSession(name = null) {
-  const tabs = await getAllTabsInCurrentWindow();
-  const items = tabs.map(t => ({ url: t.url, pinned: t.pinned, title: t.title }));
-  const sessions = await loadSessions();
-  const stamp = new Date().toISOString().replace('T',' ').replace(/\..+/, '');
-  sessions.unshift({ id: crypto.randomUUID(), name: name || `Session ${stamp}`, createdAt: Date.now(), items });
-  await persistSessions(sessions);
-  return sessions[0];
+async function saveCurrentSession(name = "") {
+  const snap = await snapshotCurrentWindow();
+  const sessions = await getSessions();
+  const id = crypto.randomUUID();
+  const entry = { id, name: name || `Session ${sessions.length + 1}`, createdAt: iso(), favorite: false, tabs: snap };
+  sessions.unshift(entry);
+  await saveSessions(sessions);
+  await setLastId(id);
+  setBadge("✓");
+  return entry;
 }
-async function restoreSession(id) {
-  const sessions = await loadSessions();
-  const s = sessions.find(x => x.id === id) || sessions[0];
-  if (!s) return false;
-  const win = await chrome.windows.getCurrent();
-  for (const it of s.items) {
-    try { await chrome.tabs.create({ windowId: win.id, url: it.url, pinned: !!it.pinned, active: false }); }
-    catch {}
+
+async function openSession(s) {
+  if (!s) throw new Error("Session nicht gefunden");
+  const win = await chrome.windows.create({ url: s.tabs.length ? s.tabs.map(t => t.url) : undefined });
+  const newTabs = await chrome.tabs.query({ windowId: win.id });
+  for (let i = 0; i < Math.min(newTabs.length, s.tabs.length); i++) {
+    if (s.tabs[i].pinned) try { await chrome.tabs.update(newTabs[i].id, { pinned: true }); } catch {}
   }
-  return true;
-}
-async function deleteSession(id) {
-  const sessions = await loadSessions();
-  await persistSessions(sessions.filter(s => s.id !== id));
 }
 
-async function focusMode() {
-  const settings = await getSettings();
-  const tabs = await getAllTabsInCurrentWindow();
-  const active = tabs.find(t => t.active) || tabs[0];
-  if (!active) return;
+async function openById(id) {
+  const sessions = await getSessions();
+  const s = byId(sessions, id);
+  await openSession(s);
+  await setLastId(id);
+}
 
-  const toClose = [];
-  for (const t of tabs) {
-    if (t.id === active.id) continue;
-    if (settings.focusKeepPinned && t.pinned) continue;
-    if (settings.focusKeepSameDomain && sameDomain(t.url, active.url)) continue;
-    if (!settings.focusCloseAudible && t.audible) continue;
-    toClose.push(t.id);
-  }
-  if (toClose.length) await chrome.tabs.remove(toClose);
-  return toClose.length;
+async function openLast() {
+  const id = await getLastId();
+  if (!id) throw new Error("Keine letzte Session gespeichert");
+  await openById(id);
+}
+
+async function openFavorite() {
+  const sessions = await getSessions();
+  const fav = sessions.find(x => x.favorite);
+  if (!fav) throw new Error("Keine Favoriten-Session gesetzt");
+  await openById(fav.id);
 }
 
 async function closeDuplicates() {
-  const tabs = await getAllTabsInCurrentWindow();
+  const tabs = await chrome.tabs.query({ currentWindow: true });
   const seen = new Set();
   const toClose = [];
   for (const t of tabs) {
-    const key = (t.url || '').split('#')[0]; // gleiche Seite, unabhängig vom Hash
-    if (seen.has(key) && !t.pinned) toClose.push(t.id);
-    else seen.add(key);
+    const url = (t.url || "").replace(/#.*$/, "");
+    if (!url || url.startsWith("chrome://")) continue;
+    if (seen.has(url)) toClose.push(t.id);
+    else seen.add(url);
   }
   if (toClose.length) await chrome.tabs.remove(toClose);
+  setBadge(toClose.length ? String(toClose.length) : "");
   return toClose.length;
 }
 
-/** Shortcuts **/
-chrome.commands.onCommand.addListener(async (cmd) => {
-  if (cmd === 'tabfix_focus_mode') await focusMode();
-  if (cmd === 'tabfix_save_session') await saveCurrentSession();
-  if (cmd === 'tabfix_restore_last') {
-    const sessions = await loadSessions();
-    if (sessions.length) await restoreSession(sessions[0].id);
+async function focusNow() {
+  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const others = tabs.filter(t => !t.active).map(t => t.id);
+  if (others.length) {
+    const gid = await chrome.tabs.group({ tabIds: others });
+    await chrome.tabGroups.update(gid, { collapsed: true, title: "Tabfix – Focus" });
   }
+}
+
+function setBadge(text = "") {
+  chrome.action.setBadgeText({ text });
+  chrome.action.setBadgeBackgroundColor({ color: "#111" });
+}
+
+function openRepo() { chrome.tabs.create({ url: REPO_URL }); }
+
+async function exportSessions() {
+  const sessions = await getSessions();
+  const blob = new Blob([JSON.stringify(sessions, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  await chrome.downloads.download({ url, filename: "tabfix-sessions.json", saveAs: true });
+  URL.revokeObjectURL(url);
+}
+
+async function importSessionsFromText(text) {
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed)) throw new Error("Ungültiges JSON");
+  await saveSessions(parsed);
+}
+
+// ======= Kontextmenü & Shortcuts =======
+chrome.runtime.onInstalled.addListener(async () => {
+  // Kontextmenü
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({ id: "tabfix.save",    title: "Tabfix: Aktuelle Session speichern", contexts: ["action"] });
+    chrome.contextMenus.create({ id: "tabfix.openlast",title: "Tabfix: Letzte Session öffnen",     contexts: ["action"] });
+    chrome.contextMenus.create({ id: "tabfix.focus",   title: "Tabfix: Focus jetzt erzwingen",     contexts: ["action"] });
+    chrome.contextMenus.create({ id: "tabfix.dupes",   title: "Tabfix: Duplikate schließen",       contexts: ["action"] });
+  });
 });
 
-/** Messages von Popup / Options **/
+chrome.contextMenus.onClicked.addListener(async (info) => {
+  try {
+    if (info.menuItemId === "tabfix.save") await saveCurrentSession();
+    if (info.menuItemId === "tabfix.openlast") await openLast();
+    if (info.menuItemId === "tabfix.focus") await focusNow();
+    if (info.menuItemId === "tabfix.dupes") await closeDuplicates();
+  } catch (e) { notify(String(e?.message || e)); }
+});
+
+chrome.commands.onCommand.addListener(async (cmd) => {
+  try {
+    if (cmd === "save_session")    await saveCurrentSession();
+    if (cmd === "open_last")       await openLast();
+    if (cmd === "focus_now")       await focusNow();
+    if (cmd === "close_dupes")     await closeDuplicates();
+  } catch (e) { notify(String(e?.message || e)); }
+});
+
+// ======= Auto-Restore =======
+chrome.runtime.onStartup.addListener(async () => {
+  try {
+    const cfg = await getCfg();
+    if (!cfg.autoRestore) return;
+    if (cfg.restoreMode === "favorite") await openFavorite();
+    else await openLast();
+  } catch { /* still silent */ }
+});
+
+// ======= Messaging (Popup/Options) =======
 chrome.runtime.onMessage.addListener((msg, _sender, send) => {
   (async () => {
-    if (msg?.type === 'SAVE_SESSION') {
-      send({ ok: true, session: await saveCurrentSession(msg.name || null) });
-    } else if (msg?.type === 'GET_SESSIONS') {
-      send({ ok: true, sessions: await loadSessions() });
-    } else if (msg?.type === 'RESTORE_SESSION') {
-      send({ ok: await restoreSession(msg.id) });
-    } else if (msg?.type === 'DELETE_SESSION') {
-      await deleteSession(msg.id); send({ ok: true });
-    } else if (msg?.type === 'FOCUS_MODE') {
-      const n = await focusMode(); send({ ok: true, closed: n });
-    } else if (msg?.type === 'CLOSE_DUPLICATES') {
-      const n = await closeDuplicates(); send({ ok: true, closed: n });
-    } else if (msg?.type === 'OPEN_OPTIONS') {
-      await chrome.runtime.openOptionsPage(); send({ ok: true });
-    } else if (msg?.type === 'OPEN_REPO') {
-      await chrome.tabs.create({ url: 'https://github.com/goldesel-labs/tabfix' }); send({ ok: true });
-    } else if (msg?.type === 'GET_SETTINGS') {
-      send({ ok: true, settings: await getSettings() });
-    } else if (msg?.type === 'SET_SETTINGS') {
-      await saveSettings(msg.settings); send({ ok: true });
-    }
+    try {
+      switch (msg.type) {
+        case "SAVE_SESSION":      return send({ ok: true, entry: await saveCurrentSession(msg.name) });
+        case "OPEN_LAST":         await openLast(); return send({ ok: true });
+        case "OPEN_BY_ID":        await openById(msg.id); return send({ ok: true });
+        case "CLOSE_DUPES":       return send({ ok: true, closed: await closeDuplicates() });
+        case "FOCUS_NOW":         await focusNow(); return send({ ok: true });
+        case "OPEN_REPO":         openRepo(); return send({ ok: true });
+        case "GET_SESSIONS":      return send({ ok: true, sessions: await getSessions() });
+        case "SET_SESSIONS":      await saveSessions(msg.sessions || []); return send({ ok: true });
+        case "SET_LAST":          await setLastId(msg.id); return send({ ok: true });
+        case "GET_CFG":           return send({ ok: true, cfg: await getCfg() });
+        case "SET_CFG":           await setCfg(msg.cfg || defaultConfig); return send({ ok: true });
+        case "EXPORT":            await exportSessions(); return send({ ok: true });
+        case "IMPORT_TEXT":       await importSessionsFromText(msg.text || ""); return send({ ok: true });
+        default:                  return send({ ok: false, error: "Unknown message" });
+      }
+    } catch (e) { return send({ ok: false, error: String(e?.message || e) }); }
   })();
-  return true; // async response
+  return true;
 });
+
+function notify(message) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "assets/icon-128.png",
+    title: "Tabfix",
+    message
+  }, () => {});
+}
