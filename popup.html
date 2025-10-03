@@ -1,42 +1,47 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="utf-8" />
   <title>Tabfix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --gap: 8px; }
-    body { font: 14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; margin:12px; min-width:340px; }
-    h1 { font-size:16px; margin:0 0 var(--gap); }
-    .row { display:flex; gap:var(--gap); margin: var(--gap) 0; flex-wrap:wrap; }
-    input[type=text] { flex:1; padding:8px; border:1px solid #ddd; border-radius:8px; }
-    button { padding:8px 10px; border-radius:8px; border:1px solid #ddd; cursor:pointer; }
-    button.primary { background:#111; color:#fff; border-color:#111; }
-    small#status { color:#666 }
-    .split { display:flex; gap:var(--gap); }
-    .split > * { flex:1 }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 12px; width: 320px; }
+    h1 { font-size: 16px; margin: 0 0 10px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { padding: 8px; border: 1px solid #e2e2e2; border-radius: 8px; cursor: pointer; }
+    button.primary { border-color: #3b82f6; }
+    .row { margin: 10px 0; }
+    .sessions { max-height: 160px; overflow: auto; border: 1px solid #eee; border-radius: 8px; padding: 6px; }
+    .session { display: flex; justify-content: space-between; align-items: center; padding: 6px; border-bottom: 1px dashed #eee; }
+    .session:last-child { border-bottom: none; }
+    .muted { color: #666; font-size: 12px; }
+    .links { display: flex; gap: 8px; justify-content: space-between; margin-top: 6px; }
+    input[type="file"] { display: none; }
   </style>
 </head>
 <body>
-  <h1>Tabfix — Sessions</h1>
+  <h1>Tabfix — Sessions & Focus</h1>
+
+  <div class="grid">
+    <button id="btnSave" class="primary">Speichern</button>
+    <button id="btnOpen">Letzte Session öffnen</button>
+    <button id="btnDup">Duplikate schließen</button>
+    <button id="btnFocus">Focus jetzt</button>
+  </div>
+
+  <div class="row links">
+    <button id="btnExport">Export</button>
+    <label for="importFile"><button id="btnImport">Import</button></label>
+    <input id="importFile" type="file" accept="application/json" />
+    <button id="btnOptions">Einstellungen</button>
+    <a id="repo" href="https://github.com/goldesel-labs/tabfix" target="_blank">Repo</a>
+  </div>
 
   <div class="row">
-    <input id="sessionName" type="text" placeholder="Session-Name (z. B. Kundenprojekt)"/>
-    <button id="save" class="primary">Speichern</button>
+    <div class="muted">Gespeicherte Sessions</div>
+    <div id="list" class="sessions"></div>
   </div>
 
-  <div class="row split">
-    <button id="openLast">Letzte Session öffnen</button>
-    <button id="closeDupes">Duplikate schließen</button>
-    <button id="focus">Focus jetzt</button>
-  </div>
-
-  <div class="row split">
-    <button id="options">Einstellungen</button>
-    <button id="repo">Repo</button>
-  </div>
-
-  <small id="status"></small>
   <script src="popup.js"></script>
 </body>
 </html>
